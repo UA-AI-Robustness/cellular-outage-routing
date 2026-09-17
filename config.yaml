@@ -1,0 +1,33 @@
+# config.yaml — all tunable parameters for the connectivity-routing pipeline
+
+# ---- Stage 0: road graph ----
+city: "San Francisco, California, USA"   # any OSM-recognized place string
+network_type: "drive"                    # drivable roads only
+
+# ---- Stage 1: signal layer (used next) ----
+signal:
+  sample_spacing_m: 25       # Delta: distance between sample points on an edge
+  tower_radius_m: 3000       # candidate towers within this radius of a sample point
+  # propagation (log-distance model)
+  pl0_db: 38.0               # PL0: reference path loss at d0
+  d0_m: 1.0                  # reference distance
+  n_los: 2.2                 # path-loss exponent, line-of-sight
+  n_nlos: 3.8                # path-loss exponent, non-line-of-sight
+  nlos_penalty_db: 20.0      # X: extra loss when a building blocks the path
+  p_tx_dbm: 43.0             # tower transmit power
+  g_tower_db: 15.0           # tower antenna gain
+  g_device_db: 0.0           # device antenna gain
+  bandwidth_hz: 20.0e6       # channel bandwidth B
+  noise_figure_db: 7.0       # NF
+  # coverage threshold
+  theta_db: 3.0              # usability threshold (SINR >= theta => covered)
+
+# ---- Stage 2: load model (v2) ----
+load:
+  devices_per_vehicle: 1.2   # rho
+  operator_share: 0.3        # phi (set 1.0 to model total load)
+  background_devices: 8      # N_bg (crude constant fallback)
+
+# ---- general ----
+seed: 42
+cache_dir: "cache"
