@@ -9,15 +9,15 @@ signal:
   sample_spacing_m: 25       # Delta: distance between sample points on an edge
   tower_radius_m: 3000       # candidate towers within this radius of a sample point
   # propagation (log-distance model)
-  pl0_db: 38.0               # PL0: reference path loss at d0
+  pl0_db: 32.4               # PL0: reference path loss at d0
   d0_m: 1.0                  # reference distance
-  n_los: 2.2                 # path-loss exponent, line-of-sight
-  n_nlos: 3.8                # path-loss exponent, non-line-of-sight
+  n_los: 3.5                 # path-loss exponent, line-of-sight
+  n_nlos: 4.0                # path-loss exponent, non-line-of-sight
   nlos_penalty_db: 20.0      # X: extra loss when a building blocks the path
-  p_tx_dbm: 43.0             # tower transmit power
-  g_tower_db: 15.0           # tower antenna gain
+  p_tx_dbm: 33.0             # tower transmit power
+  g_tower_db: 12.0           # tower antenna gain
   g_device_db: 0.0           # device antenna gain
-  bandwidth_hz: 20.0e6       # channel bandwidth B
+  bandwidth_hz: 20000000.0   # plain number, unambiguous
   noise_figure_db: 7.0       # NF
   # coverage threshold
   theta_db: 3.0              # usability threshold (SINR >= theta => covered)
