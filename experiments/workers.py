@@ -85,43 +85,55 @@ def baselines_pair(G, cfg, task):
 
     return rows
 
+
 def livecall_pair(G, cfg, task):
-    """task = (s, d). Max-min framing: for a sweep of detour budgets, the best
-    worst-segment rate achievable within that detour. One consistent population."""
-    from connroute.search.lexico import lexico_route, maxmin_rate_within_time
+    """task = (s, d). Live-call via call-inadequate distance (d_lowrate):
+    our constrained method (sweep budget B) vs weighted-sum baseline (sweep lambda).
+    Mirrors the continuity/baseline comparison."""
+    from connroute.search.lexico import (lexico_route, constrained_route,
+                                          weighted_sum_route)
     s, d = task
     prefs = build_preferences(cfg)
+
+    # fastest route = reference
     fp, _ = lexico_route(G, s, d, make_order(prefs, ["time"]))
     if not fp:
         return []
 
-    def worst_rate(path):
-        qmin = float("inf")
+    def path_lowrate_time(path):
+        lr = tt = 0.0
         for a, b in zip(path[:-1], path[1:]):
             ed = min(G[a][b].values(), key=lambda e: float(e["time"]))
-            qmin = min(qmin, float(ed["q"]))
-        return 0.0 if qmin == float("inf") else qmin
+            lr += float(ed["d_lowrate"]); tt += float(ed["time"])
+        return lr, tt
 
-    # fastest route's time and its (poor) worst-segment rate
-    ft = 0.0
-    for a, b in zip(fp[:-1], fp[1:]):
-        ft += min(float(e["time"]) for e in G[a][b].values())
-    fast_qmin = worst_rate(fp)
+    fast_lr, ft = path_lowrate_time(fp)
+    if fast_lr <= 100:            # only pairs whose fast route has real low-rate distance
+        return []
 
     rows = []
-    for detour_frac in (0.0, 0.05, 0.10, 0.20, 0.40):
-        budget = ft * (1.0 + detour_frac)
-        path, tau, tt = maxmin_rate_within_time(G, s, d, time_budget=budget)
-        if not path:
+    # our method: constrained on low-rate distance, sweep budget
+    for B in (25, 50, 100, 200, 400, 800):
+        cp, _, _ = constrained_route(G, s, d, budget_attr="d_lowrate",
+                                     budget=float(B), cost_attr="time")
+        if not cp:
             continue
-        rows.append({
-            "s": s, "d": d, "detour_allowed": detour_frac * 100,
-            "fast_qmin": fast_qmin,
-            "best_qmin": tau,
-            "qmin_gain": tau - fast_qmin,
-            "actual_detour_pct": 100.0 * (tt - ft) / ft if ft else 0.0,
-        })
+        clr, ct = path_lowrate_time(cp)
+        rows.append({"method": "constrained", "knob": B, "s": s, "d": d,
+                     "lowrate_removed_pct": 100.0*(fast_lr-clr)/fast_lr,
+                     "detour_pct": 100.0*(ct-ft)/ft if ft else 0.0})
+
+    # baseline: weighted-sum time + lambda * low-rate distance, sweep lambda
+    for lam in (0.0, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0):
+        wp = weighted_sum_route(G, s, d, lam=lam, penalty_attr="d_lowrate")
+        if not wp:
+            continue
+        wlr, wt = path_lowrate_time(wp)
+        rows.append({"method": "weighted_sum", "knob": lam, "s": s, "d": d,
+                     "lowrate_removed_pct": 100.0*(fast_lr-wlr)/fast_lr,
+                     "detour_pct": 100.0*(wt-ft)/ft if ft else 0.0})
     return rows
+
 
 def upload_pair(G, cfg, task):
     """task = (s, d). Max delivered data within a sweep of detour budgets."""
