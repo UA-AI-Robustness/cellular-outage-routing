@@ -27,7 +27,8 @@ load:
   devices_per_vehicle: 1.2   # rho
   operator_share: 0.3        # phi (set 1.0 to model total load)
   background_devices: 8      # N_bg (crude constant fallback)
-
+  tau_call: 0.10          # min normalized rate for a usable call
+  
 # ---- general ----
 seed: 42
 cache_dir: "cache"

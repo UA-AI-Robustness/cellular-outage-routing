@@ -27,7 +27,8 @@ class LoadCfg:
     devices_per_vehicle: float
     operator_share: float
     background_devices: float
-
+    tau_call: float = 0.10          # NEW, with default so old configs still load
+    
 
 @dataclass
 class Config:

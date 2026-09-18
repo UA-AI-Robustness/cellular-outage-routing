@@ -74,12 +74,11 @@ def attach_objectives(cfg: Config, Gp=None):
         base = cell_traffic.get(T, 0.0) * lcfg.devices_per_vehicle * lcfg.operator_share
         return base + lcfg.background_devices
 
-    # --- 3. per-user rate q(e) and data-volume contribution q_dwell ---
     # --- 3. per-user rate q(e), gated by coverage ---
     q_vals = []
     for _, _, data in Gp.edges(data=True):
         T = data.get("serve", -1)
-        covered_frac = 1.0 - data["dead_fraction"]        # NEW: fraction of edge that's usable
+        covered_frac = 1.0 - data["dead_fraction"]        # fraction of edge that's usable
         if T < 0 or data["r_raw"] <= 0.0 or covered_frac <= 0.0:
             q = 0.0
         else:
@@ -97,6 +96,16 @@ def attach_objectives(cfg: Config, Gp=None):
     for _, _, data in Gp.edges(data=True):
         data["q"] = min(data["q_raw"] / q_ref, 1.0)   # clip at 1
         data["q_dwell"] = data["q"] * data["dwell"]
+
+    # --- 4. call-inadequate distance (live-call objective) ---
+    # Mirrors d_dead, but thresholded on RATE instead of coverage: an edge whose
+    # normalized rate q is below the call-quality threshold tau_call contributes
+    # its length as "call-inadequate distance". This lets live-call reuse the same
+    # constrained search as continuity (budget_attr="d_lowrate").
+    tau_call = float(getattr(lcfg, "tau_call", 0.10))    # default 0.10 if not in config
+    for _, _, data in Gp.edges(data=True):
+        inadequate = 1.0 if data["q"] < tau_call else 0.0
+        data["d_lowrate"] = inadequate * data["length"]   # metres below call-quality rate
 
     return Gp
 
