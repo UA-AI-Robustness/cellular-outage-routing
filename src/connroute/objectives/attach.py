@@ -87,11 +87,15 @@ def attach_objectives(cfg: Config, Gp=None):
         data["q_raw"] = q
         q_vals.append(q)
 
-    # normalize q to [0,1] across the graph so it sits beside other prefs
+    # normalize q to [0,1] using the 95th percentile (robust to the heavy tail),
+    # clipped to 1 so a few very-high-rate edges don't squash the rest toward 0.
     q_arr = np.array(q_vals)
-    q_max = q_arr.max() if q_arr.size and q_arr.max() > 0 else 1.0
+    pos = q_arr[q_arr > 0]
+    q_ref = np.percentile(pos, 95) if pos.size else 1.0
+    if q_ref <= 0:
+        q_ref = 1.0
     for _, _, data in Gp.edges(data=True):
-        data["q"] = data["q_raw"] / q_max
+        data["q"] = min(data["q_raw"] / q_ref, 1.0)   # clip at 1
         data["q_dwell"] = data["q"] * data["dwell"]
 
     return Gp

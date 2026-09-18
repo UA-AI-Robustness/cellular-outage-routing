@@ -84,3 +84,72 @@ def baselines_pair(G, cfg, task):
                      "dead_removed_pct": 100.0*(fd-sd)/fd, "detour_pct": 100.0*(st-ft)/ft})
 
     return rows
+
+def livecall_pair(G, cfg, task):
+    """task = (s, d). Max-min framing: for a sweep of detour budgets, the best
+    worst-segment rate achievable within that detour. One consistent population."""
+    from connroute.search.lexico import lexico_route, maxmin_rate_within_time
+    s, d = task
+    prefs = build_preferences(cfg)
+    fp, _ = lexico_route(G, s, d, make_order(prefs, ["time"]))
+    if not fp:
+        return []
+
+    def worst_rate(path):
+        qmin = float("inf")
+        for a, b in zip(path[:-1], path[1:]):
+            ed = min(G[a][b].values(), key=lambda e: float(e["time"]))
+            qmin = min(qmin, float(ed["q"]))
+        return 0.0 if qmin == float("inf") else qmin
+
+    # fastest route's time and its (poor) worst-segment rate
+    ft = 0.0
+    for a, b in zip(fp[:-1], fp[1:]):
+        ft += min(float(e["time"]) for e in G[a][b].values())
+    fast_qmin = worst_rate(fp)
+
+    rows = []
+    for detour_frac in (0.0, 0.05, 0.10, 0.20, 0.40):
+        budget = ft * (1.0 + detour_frac)
+        path, tau, tt = maxmin_rate_within_time(G, s, d, time_budget=budget)
+        if not path:
+            continue
+        rows.append({
+            "s": s, "d": d, "detour_allowed": detour_frac * 100,
+            "fast_qmin": fast_qmin,
+            "best_qmin": tau,
+            "qmin_gain": tau - fast_qmin,
+            "actual_detour_pct": 100.0 * (tt - ft) / ft if ft else 0.0,
+        })
+    return rows
+
+def upload_pair(G, cfg, task):
+    """task = (s, d). Max delivered data within a sweep of detour budgets."""
+    from connroute.search.lexico import lexico_route, max_data_within_time
+    s, d = task
+    prefs = build_preferences(cfg)
+    fp, _ = lexico_route(G, s, d, make_order(prefs, ["time"]))
+    if not fp:
+        return []
+
+    def path_data_time(path):
+        dat = tt = 0.0
+        for a, b in zip(path[:-1], path[1:]):
+            ed = min(G[a][b].values(), key=lambda e: float(e["time"]))
+            dat += float(ed["q_dwell"]); tt += float(ed["time"])
+        return dat, tt
+
+    fast_data, ft = path_data_time(fp)
+    rows = []
+    for detour_frac in (0.0, 0.05, 0.10, 0.20, 0.40):
+        budget = ft * (1.0 + detour_frac)
+        path, data, tt = max_data_within_time(G, s, d, time_budget=budget)
+        if not path:
+            continue
+        rows.append({
+            "s": s, "d": d, "detour_allowed": detour_frac * 100,
+            "fast_data": fast_data, "best_data": data,
+            "data_gain_pct": 100.0 * (data - fast_data) / fast_data if fast_data > 0 else 0.0,
+            "actual_detour_pct": 100.0 * (tt - ft) / ft if ft else 0.0,
+        })
+    return rows

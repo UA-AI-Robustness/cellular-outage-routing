@@ -289,3 +289,155 @@ def weighted_sum_route(G, s, d, lam=0.0, cost_attr="time", penalty_attr="d_dead"
         path.append(p)
     path.reverse()
     return path
+
+def min_rate_route(G, s, d, tau=0.0, cost_attr="time", rate_attr="q"):
+    """Live-call framing: minimize summed cost_attr over routes where EVERY edge
+    has rate_attr >= tau (guaranteed worst-segment rate). Plain Dijkstra on time,
+    with edges below tau forbidden. Returns [] if no such route exists."""
+    import heapq, itertools
+    counter = itertools.count()
+    dist = {s: 0.0}; prev = {}
+    pq = [(0.0, next(counter), s)]
+    while pq:
+        dcur, _, u = heapq.heappop(pq)
+        if dcur > dist.get(u, float("inf")):
+            continue
+        if u == d:
+            break
+        for _, v, k, ed in G.edges(u, keys=True, data=True):
+            if float(ed[rate_attr]) < tau:      # FORBID edges below the rate floor
+                continue
+            nd = dcur + float(ed[cost_attr])
+            if nd < dist.get(v, float("inf")):
+                dist[v] = nd; prev[v] = u
+                heapq.heappush(pq, (nd, next(counter), v))
+    if d not in dist:
+        return []
+    path = [d]
+    while path[-1] != s:
+        p = prev.get(path[-1])
+        if p is None: return []
+        path.append(p)
+    path.reverse()
+    return path
+
+def maxmin_rate_within_time(G, s, d, time_budget, cost_attr="time", rate_attr="q"):
+    """Maximize the worst-segment (bottleneck) rate over routes whose total
+    cost_attr <= time_budget. Returns (path, worst_rate, total_time) or ([],None,None).
+
+    Method: binary-search the achievable rate floor. For a candidate floor tau,
+    forbid edges below tau and check if a route within time_budget exists (Dijkstra
+    on time). The largest feasible tau is the answer.
+    """
+    import heapq, itertools
+
+    def fastest_time_with_floor(tau):
+        """Min total time over routes using only edges with rate >= tau; inf if none."""
+        counter = itertools.count()
+        dist = {s: 0.0}
+        pq = [(0.0, next(counter), s)]
+        while pq:
+            dcur, _, u = heapq.heappop(pq)
+            if dcur > dist.get(u, float("inf")):
+                continue
+            if u == d:
+                return dcur
+            for _, v, k, ed in G.edges(u, keys=True, data=True):
+                if float(ed[rate_attr]) < tau:
+                    continue
+                nd = dcur + float(ed[cost_attr])
+                if nd < dist.get(v, float("inf")):
+                    dist[v] = nd
+                    heapq.heappush(pq, (nd, next(counter), v))
+        return dist.get(d, float("inf"))
+
+    # candidate rate floors = the distinct edge-rate values on the graph, sorted.
+    # binary-search the highest floor whose fastest route fits the time budget.
+    rates = sorted({round(float(ed[rate_attr]), 4) for _, _, ed in G.edges(data=True)})
+    lo, hi, best_tau = 0, len(rates) - 1, 0.0
+    # feasibility at tau=0 is required (else no route at all)
+    if fastest_time_with_floor(0.0) > time_budget:
+        return [], None, None
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        if fastest_time_with_floor(rates[mid]) <= time_budget:
+            best_tau = rates[mid]
+            lo = mid + 1
+        else:
+            hi = mid - 1
+
+    # reconstruct the actual route at best_tau (fastest within floor)
+    counter = itertools.count()
+    dist = {s: 0.0}; prev = {}
+    pq = [(0.0, next(counter), s)]
+    while pq:
+        dcur, _, u = heapq.heappop(pq)
+        if dcur > dist.get(u, float("inf")):
+            continue
+        if u == d:
+            break
+        for _, v, k, ed in G.edges(u, keys=True, data=True):
+            if float(ed[rate_attr]) < best_tau:
+                continue
+            nd = dcur + float(ed[cost_attr])
+            if nd < dist.get(v, float("inf")):
+                dist[v] = nd; prev[v] = u
+                heapq.heappush(pq, (nd, next(counter), v))
+    if d not in dist:
+        return [], None, None
+    path = [d]
+    while path[-1] != s:
+        p = prev.get(path[-1])
+        if p is None: return [], None, None
+        path.append(p)
+    path.reverse()
+    return path, best_tau, dist[d]
+
+def max_data_within_time(G, s, d, time_budget,
+                         cost_attr="time", data_attr="q_dwell"):
+    """Maximize summed data_attr subject to summed cost_attr <= time_budget.
+    Resource-constrained: label = (data_so_far, time_so_far); keep non-dominated
+    labels (more data AND less time dominates); prune labels over the time budget.
+    Returns (path, total_data, total_time) or ([], None, None)."""
+    import heapq, itertools
+    counter = itertools.count()
+    # maximize data -> store NEGATIVE data in the heap so heapq (min-heap) pops best first
+    best: dict[int, list[tuple[float, float]]] = {s: [(0.0, 0.0)]}  # (data, time)
+    prev: dict[tuple, tuple] = {}
+    pq = [(-0.0, 0.0, next(counter), s)]   # (-data, time, tie, node)
+
+    goal = None
+    while pq:
+        neg_data, t, _, u = heapq.heappop(pq)
+        data = -neg_data
+        if not any(abs(dd - data) < 1e-9 and abs(tt - t) < 1e-9
+                   for (dd, tt) in best.get(u, [])):
+            continue
+        if u == d:
+            goal = (data, t)
+            break
+        for _, v, k, ed in G.edges(u, keys=True, data=True):
+            nt = t + float(ed[cost_attr])
+            if nt > time_budget:            # PRUNE: over the time budget
+                continue
+            nd = data + float(ed[data_attr])
+            labels = best.setdefault(v, [])
+            # dominated if an existing label has >= data AND <= time
+            if any(dd >= nd - 1e-9 and tt <= nt + 1e-9 for (dd, tt) in labels):
+                continue
+            labels[:] = [(dd, tt) for (dd, tt) in labels
+                         if not (nd >= dd - 1e-9 and nt <= tt + 1e-9)]
+            labels.append((nd, nt))
+            prev[(v, round(nd, 6), round(nt, 6))] = (u, round(data, 6), round(t, 6))
+            heapq.heappush(pq, (-nd, nt, next(counter), v))
+
+    if goal is None:
+        return [], None, None
+    data, t = goal
+    path = [d]; state = (d, round(data, 6), round(t, 6))
+    while state[0] != s:
+        p = prev.get(state)
+        if p is None: break
+        path.append(p[0]); state = p
+    path.reverse()
+    return path, data, t
