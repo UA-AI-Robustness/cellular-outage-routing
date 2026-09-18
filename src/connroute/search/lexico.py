@@ -185,3 +185,107 @@ def constrained_route(G, s: int, d: int,
         state = p
     path.reverse()
     return path, cost, bud
+
+
+def constrained_route_astar(G, s: int, d: int,
+                            budget_attr: str = "d_dead", budget: float = 100.0,
+                            cost_attr: str = "time",
+                            max_speed_mps: float | None = None):
+    """A*-accelerated constrained shortest path: minimize summed cost_attr subject
+    to summed budget_attr <= budget. Uses a straight-line admissible time heuristic.
+
+    Returns identical routes to constrained_route (admissible heuristic), just faster.
+    Requires node attributes 'x','y' (projected metres). max_speed_mps is the graph's
+    fastest edge speed (used for the admissible time bound); auto-computed if None.
+    """
+    import heapq, itertools, math
+
+    # --- admissible heuristic: straight-line distance / max speed <= true remaining time ---
+    if max_speed_mps is None:
+        # fastest edge speed in the graph (m/s); guarantees under-estimate of time
+        speeds = []
+        for _, _, ed in G.edges(data=True):
+            L = float(ed.get("length", 0.0)); T = float(ed.get(cost_attr, 0.0))
+            if T > 0 and L > 0:
+                speeds.append(L / T)
+        max_speed_mps = max(speeds) if speeds else 30.0
+
+    dx_goal, dy_goal = float(G.nodes[d]["x"]), float(G.nodes[d]["y"])
+    def h(u):
+        ux, uy = float(G.nodes[u]["x"]), float(G.nodes[u]["y"])
+        return math.hypot(ux - dx_goal, uy - dy_goal) / max_speed_mps   # <= true remaining time
+
+    counter = itertools.count()
+    best: dict[int, list[tuple[float, float]]] = {s: [(0.0, 0.0)]}
+    prev: dict[tuple, tuple] = {}
+    # priority = f = g_cost + h(node); tie-break by budget then counter
+    pq = [(h(s), 0.0, 0.0, next(counter), s)]   # (f, cost, budget, tie, node)
+
+    goal_state = None
+    while pq:
+        f, cost, bud, _, u = heapq.heappop(pq)
+        if not any(abs(c - cost) < 1e-9 and abs(b - bud) < 1e-9
+                   for (c, b) in best.get(u, [])):
+            continue
+        if u == d:
+            goal_state = (cost, bud)
+            break
+        for _, v, k, ed in G.edges(u, keys=True, data=True):
+            nb = bud + float(ed[budget_attr])
+            if nb > budget:
+                continue
+            nc = cost + float(ed[cost_attr])
+            labels = best.setdefault(v, [])
+            if any(c <= nc + 1e-9 and b <= nb + 1e-9 for (c, b) in labels):
+                continue
+            labels[:] = [(c, b) for (c, b) in labels
+                         if not (nc <= c + 1e-9 and nb <= b + 1e-9)]
+            labels.append((nc, nb))
+            prev[(v, round(nc, 6), round(nb, 6))] = (u, round(cost, 6), round(bud, 6))
+            heapq.heappush(pq, (nc + h(v), nc, nb, next(counter), v))
+
+    if goal_state is None:
+        return [], None, None
+
+    cost, bud = goal_state
+    path = [d]; state = (d, round(cost, 6), round(bud, 6))
+    while state[0] != s:
+        p = prev.get(state)
+        if p is None:
+            break
+        path.append(p[0]); state = p
+    path.reverse()
+    return path, cost, bud
+
+def weighted_sum_route(G, s, d, lam=0.0, cost_attr="time", penalty_attr="d_dead"):
+    """Baseline: minimize sum of (cost_attr + lam * penalty_attr) over the route.
+    This is the standard coverage-aware scalarization (the competitor's approach).
+    Plain Dijkstra on the blended edge weight."""
+    import heapq, itertools
+    counter = itertools.count()
+    dist = {s: 0.0}
+    prev = {}
+    pq = [(0.0, next(counter), s)]
+    while pq:
+        dcur, _, u = heapq.heappop(pq)
+        if dcur > dist.get(u, float("inf")):
+            continue
+        if u == d:
+            break
+        for _, v, k, ed in G.edges(u, keys=True, data=True):
+            w = float(ed[cost_attr]) + lam * float(ed[penalty_attr])
+            nd = dcur + w
+            if nd < dist.get(v, float("inf")):
+                dist[v] = nd
+                prev[v] = u
+                heapq.heappush(pq, (nd, next(counter), v))
+    if d not in dist:
+        return []
+    path = [d]
+    while path[-1] != s:
+        p = prev.get(path[-1])
+        if p is None:
+            return []
+        path.append(p)
+    path.reverse()
+    return path
