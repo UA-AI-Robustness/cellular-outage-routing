@@ -1,36 +1,52 @@
-"""Stage 3 — mixed-aggregation lexicographic shortest path.
+"""Stage 3 — routing search.
 
-Finds the route from s to d that is optimal under a priority-ordered list of
-Preferences, where each preference combines along the route with its OWN operator
-(sum or min), compared lexicographically. Everything is in the MAXIMIZE
-convention (minimized objectives were negated in preferences.py), so 'better'
-always means 'lexicographically larger g-vector'.
+Two search modes:
+  1. lexico_route         : mixed-aggregation lexicographic search. Each preference
+                            combines along the route with its own operator (sum/min),
+                            compared lexicographically (maximize convention), with an
+                            optional per-preference tolerance eps.
+  2. constrained_route    : minimize a summed cost (e.g. time) subject to a summed
+                            budget (e.g. dead-exposure) <= B. Resource-constrained
+                            shortest path. This is the well-posed formulation for
+                            "avoid dead zones, but take the fastest route that does".
 
-First-pass: Dijkstra-style (H=0 admissible heuristic). Correctness before speed.
+Everything in lexico_route is in the MAXIMIZE convention: minimized objectives are
+stored negated in preferences.py, so 'better' always means 'lexicographically larger'.
 """
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import heapq
 import itertools
 
 from connroute.search.preferences import Preference
 
 
-# ---- lexicographic comparison on g-vectors (all maximize) ----
+# ======================================================================
+# Lexicographic mixed-aggregation search
+# ======================================================================
+
 def lex_greater(a: tuple, b: tuple, eps: tuple | None = None) -> bool:
-    """True if vector a is lexicographically greater than b (optionally within eps)."""
+    """True if vector a is lexicographically greater than b (optionally within eps).
+
+    Comparison walks components in priority order; a difference within eps[i] is
+    treated as a tie so lower-priority components can decide.
+    """
     for i, (ai, bi) in enumerate(zip(a, b)):
         tol = 0.0 if eps is None else eps[i]
         if ai > bi + tol:
             return True
         if ai < bi - tol:
             return False
-        # within tol -> treat as tie, move to next component
-    return False   # all equal
+        # within tolerance -> tie, continue to next component
+    return False   # all components tied
 
 
 def _identity_vec(order: list[Preference]) -> tuple:
     return tuple(p.identity for p in order)
+
+
+def _sentinel_vec(order: list[Preference]) -> tuple:
+    return tuple(p.sentinel for p in order)
 
 
 def _combine_vec(g: tuple, edge: dict, order: list[Preference]) -> tuple:
@@ -40,29 +56,26 @@ def _combine_vec(g: tuple, edge: dict, order: list[Preference]) -> tuple:
 
 @dataclass(order=False)
 class _Item:
-    """Heap item. We negate for a max-heap via a custom sort key on the g-vector."""
-    key: tuple            # the g-vector, compared lexicographically (larger = better)
-    count: int            # tie-breaker so heapq never compares nodes
+    """Heap item; ordered so that heapq (a min-heap) yields the lexicographically
+    LARGEST g-vector first."""
+    key: tuple
+    count: int
     node: int
+
     def __lt__(self, other: "_Item") -> bool:
-        # heapq is a MIN-heap; we want MAX lexicographic -> invert the comparison
+        # invert: 'smaller' for the min-heap == lexicographically greater key
         return lex_greater(self.key, other.key)
 
 
-def lexico_route(
-    G,
-    s: int,
-    d: int,
-    order: list[Preference],
-    eps: tuple | None = None,
-):
-    """Return (path, g_vector) for the lexicographically optimal route s->d.
+def lexico_route(G, s: int, d: int, order: list[Preference], eps: tuple | None = None):
+    """Lexicographically optimal route from s to d under `order`.
 
-    path : list of node ids  (empty if d unreachable)
-    g    : the achieved g-vector at d (maximize convention; negate minimized comps to read them)
+    Returns (path, g_vector). path is a list of node ids ([] if unreachable).
+    g_vector is in the maximize convention; use readable_scores() to interpret.
     """
     id_vec = _identity_vec(order)
-    best: dict[int, tuple] = {s: id_vec}     # best g-vector found per node
+    sent = _sentinel_vec(order)
+    best: dict[int, tuple] = {s: id_vec}
     prev: dict[int, int] = {}
     counter = itertools.count()
 
@@ -72,8 +85,8 @@ def lexico_route(
         item = heapq.heappop(pq)
         u, gu = item.node, item.key
 
-        # stale entry? (a better label for u was found after this was pushed)
-        if lex_greater(best.get(u, tuple(p.sentinel for p in order)), gu):
+        # stale entry: a better label for u was recorded after this was pushed
+        if lex_greater(best.get(u, sent), gu):
             continue
         if u == d:
             break
@@ -105,6 +118,70 @@ def readable_scores(g: tuple, order: list[Preference]) -> dict:
     out = {}
     for i, p in enumerate(order):
         val = g[i]
-        # minimized objectives were stored negated -> flip back for reporting
         out[p.name] = -val if p.direction == "min" else val
     return out
+
+
+# ======================================================================
+# Constrained shortest path: min summed cost s.t. summed budget <= B
+# ======================================================================
+
+def constrained_route(G, s: int, d: int,
+                      budget_attr: str = "d_dead", budget: float = 100.0,
+                      cost_attr: str = "time"):
+    """Minimize total `cost_attr` subject to total `budget_attr` <= `budget`.
+
+    Resource-constrained shortest path via label-setting: each node keeps a set of
+    non-dominated (cost, budget) labels; any extension exceeding `budget` is pruned.
+
+    Returns (path, total_cost, total_budget_used), or ([], None, None) if infeasible.
+    """
+    counter = itertools.count()
+    # best[node] = list of non-dominated (cost, budget) labels
+    best: dict[int, list[tuple[float, float]]] = {s: [(0.0, 0.0)]}
+    prev: dict[tuple, tuple] = {}
+    pq: list[tuple] = [(0.0, 0.0, next(counter), s)]   # (cost, budget, tie, node)
+
+    goal_state = None
+    while pq:
+        cost, bud, _, u = heapq.heappop(pq)
+
+        # is this label still present (non-dominated) at u?
+        if not any(abs(c - cost) < 1e-9 and abs(b - bud) < 1e-9
+                   for (c, b) in best.get(u, [])):
+            continue
+        if u == d:
+            goal_state = (cost, bud)
+            break
+
+        for _, v, k, ed in G.edges(u, keys=True, data=True):
+            nb = bud + float(ed[budget_attr])
+            if nb > budget:                     # PRUNE: over the budget
+                continue
+            nc = cost + float(ed[cost_attr])
+            labels = best.setdefault(v, [])
+            # dominated if an existing label is no worse on both dimensions
+            if any(c <= nc + 1e-9 and b <= nb + 1e-9 for (c, b) in labels):
+                continue
+            # drop labels the new one dominates
+            labels[:] = [(c, b) for (c, b) in labels
+                         if not (nc <= c + 1e-9 and nb <= b + 1e-9)]
+            labels.append((nc, nb))
+            prev[(v, round(nc, 6), round(nb, 6))] = (u, round(cost, 6), round(bud, 6))
+            heapq.heappush(pq, (nc, nb, next(counter), v))
+
+    if goal_state is None:
+        return [], None, None
+
+    # reconstruct
+    cost, bud = goal_state
+    path = [d]
+    state = (d, round(cost, 6), round(bud, 6))
+    while state[0] != s:
+        p = prev.get(state)
+        if p is None:
+            break
+        path.append(p[0])
+        state = p
+    path.reverse()
+    return path, cost, bud
