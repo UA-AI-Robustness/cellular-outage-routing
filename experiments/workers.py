@@ -135,33 +135,48 @@ def livecall_pair(G, cfg, task):
     return rows
 
 
+
+
 def upload_pair(G, cfg, task):
-    """task = (s, d). Max delivered data within a sweep of detour budgets."""
-    from connroute.search.lexico import lexico_route, max_data_within_time
+    """task = (s, d). Upload-adequate routing via d_lowupload (Option 1):
+    constrained method (sweep budget) vs weighted-sum baseline (sweep lambda)."""
+    from connroute.search.lexico import (lexico_route, constrained_route,
+                                          weighted_sum_route)
     s, d = task
     prefs = build_preferences(cfg)
+
     fp, _ = lexico_route(G, s, d, make_order(prefs, ["time"]))
     if not fp:
         return []
 
-    def path_data_time(path):
-        dat = tt = 0.0
+    def path_lowupload_time(path):
+        lu = tt = 0.0
         for a, b in zip(path[:-1], path[1:]):
             ed = min(G[a][b].values(), key=lambda e: float(e["time"]))
-            dat += float(ed["q_dwell"]); tt += float(ed["time"])
-        return dat, tt
+            lu += float(ed["d_lowupload"]); tt += float(ed["time"])
+        return lu, tt
 
-    fast_data, ft = path_data_time(fp)
+    fast_lu, ft = path_lowupload_time(fp)
+    if fast_lu <= 100:            # only pairs whose fast route has real upload-inadequate distance
+        return []
+
     rows = []
-    for detour_frac in (0.0, 0.05, 0.10, 0.20, 0.40):
-        budget = ft * (1.0 + detour_frac)
-        path, data, tt = max_data_within_time(G, s, d, time_budget=budget)
-        if not path:
+    for B in (50, 100, 200, 400, 800, 1600):
+        cp, _, _ = constrained_route(G, s, d, budget_attr="d_lowupload",
+                                     budget=float(B), cost_attr="time")
+        if not cp:
             continue
-        rows.append({
-            "s": s, "d": d, "detour_allowed": detour_frac * 100,
-            "fast_data": fast_data, "best_data": data,
-            "data_gain_pct": 100.0 * (data - fast_data) / fast_data if fast_data > 0 else 0.0,
-            "actual_detour_pct": 100.0 * (tt - ft) / ft if ft else 0.0,
-        })
+        clu, ct = path_lowupload_time(cp)
+        rows.append({"method": "constrained", "knob": B, "s": s, "d": d,
+                     "lowupload_removed_pct": 100.0*(fast_lu-clu)/fast_lu,
+                     "detour_pct": 100.0*(ct-ft)/ft if ft else 0.0})
+
+    for lam in (0.0, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0):
+        wp = weighted_sum_route(G, s, d, lam=lam, penalty_attr="d_lowupload")
+        if not wp:
+            continue
+        wlu, wt = path_lowupload_time(wp)
+        rows.append({"method": "weighted_sum", "knob": lam, "s": s, "d": d,
+                     "lowupload_removed_pct": 100.0*(fast_lu-wlu)/fast_lu,
+                     "detour_pct": 100.0*(wt-ft)/ft if ft else 0.0})
     return rows
