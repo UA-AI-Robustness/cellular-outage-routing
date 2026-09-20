@@ -107,7 +107,18 @@ def attach_objectives(cfg: Config, Gp=None):
         inadequate = 1.0 if data["q"] < tau_call else 0.0
         data["d_lowrate"] = inadequate * data["length"]   # metres below call-quality rate
 
+
+    # --- upload-inadequate distance (upload objective, Option 1) ---
+    # Like d_lowrate but a HIGHER rate bar: data-heavy uploads need more than a call.
+    tau_upload = float(getattr(lcfg, "tau_upload", 0.30))   # higher than tau_call (0.10)
+    for _, _, data in Gp.edges(data=True):
+        inadequate = 1.0 if data["q"] < tau_upload else 0.0
+        data["d_lowupload"] = inadequate * data["length"]   # metres below upload-rate
+
+
     return Gp
+
+    
 
 
 def cache_path(cfg: Config) -> Path:

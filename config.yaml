@@ -21,13 +21,14 @@ signal:
   noise_figure_db: 7.0       # NF
   # coverage threshold
   theta_db: 10.0              # usability threshold (SINR >= theta => covered)
-
+  
 # ---- Stage 2: load model (v2) ----
 load:
   devices_per_vehicle: 1.2   # rho
   operator_share: 0.3        # phi (set 1.0 to model total load)
   background_devices: 8      # N_bg (crude constant fallback)
   tau_call: 0.10          # min normalized rate for a usable call
+  tau_upload: 0.30
   
 # ---- general ----
 seed: 42
