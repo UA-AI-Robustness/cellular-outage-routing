@@ -29,7 +29,7 @@ MIN_OD_METERS = 2500.0
 MIN_DEAD_REMOVED = 300.0
 DEAD_BUDGET = 100.0
 N_EXAMPLES = 10
-CARTO_KEY = os.environ.get("CARTO_API_KEY", "")
+CARTO_KEY = os.environ.get("CARTO_API_KEY", "cb1_3rgg_1_311949a0a459755f7ec307af")
 
 
 # ---------------------------------------------------------------------------
@@ -163,7 +163,7 @@ def make_map(s, d, fast_path, conn_path, idx):
     ).add_to(m)
     HeatMap(heat_pts, radius=12, blur=18, min_opacity=0.3,
             name="Dead-zone density").add_to(m)
-    folium.PolyLine([latlon(n) for n in fast_path], color="#6C8EBF", weight=5,
+    folium.PolyLine([latlon(n) for n in fast_path], color="#C45327", weight=5,
                     opacity=0.9, tooltip="Fastest").add_to(m)
     folium.PolyLine([latlon(n) for n in conn_path], color="#1a1a1a", weight=4,
                     opacity=0.95, tooltip="Connectivity-aware").add_to(m)
