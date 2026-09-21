@@ -34,7 +34,6 @@ def _sample_points_xy(geom, spacing_m: float) -> np.ndarray:
         pts = [geom.interpolate(d) for d in dists]
     return np.array([(p.x, p.y) for p in pts])
 
-
 def build_signal_layer(cfg: Config, towers: TowerSet, G, verbose: bool = True):
     """Enrich a graph with per-edge signal summaries. Returns the projected graph."""
     scfg = cfg.signal
@@ -48,6 +47,10 @@ def build_signal_layer(cfg: Config, towers: TowerSet, G, verbose: bool = True):
     tower_xy = towers.xy                 # (N, 2) projected tower coords, metres
     radius = scfg.tower_radius_m
     theta = scfg.theta_db
+    # higher service thresholds for rate-adequacy objectives (dB, on the same
+    # noise-limited SNR proxy). Fall back to sensible defaults if not in config.
+    theta_call   = float(getattr(scfg, "theta_call_db", 15.0))
+    theta_upload = float(getattr(scfg, "theta_upload_db", 20.0))
 
     n_edges = Gp.number_of_edges()
     t0 = time.time()
@@ -89,6 +92,17 @@ def build_signal_layer(cfg: Config, towers: TowerSet, G, verbose: bool = True):
         covered = point_sinr >= theta
         dead_fraction = 1.0 - covered.mean()
 
+        # --- fractional below-threshold exposure at three service levels ---
+        # Reuse point_sinr. A point with no tower in range is -inf, so it counts
+        # as below every threshold (inadequate), consistent with dead_fraction.
+        n_pts = len(pts)
+        if n_pts > 0:
+            frac_below_cover  = 1.0 - np.mean(point_sinr >= theta)         # == dead_fraction
+            frac_below_call   = 1.0 - np.mean(point_sinr >= theta_call)
+            frac_below_upload = 1.0 - np.mean(point_sinr >= theta_upload)
+        else:
+            frac_below_cover = frac_below_call = frac_below_upload = 0.0
+
         # dominant serving tower over covered points (fall back to all points)
         served = point_serve[point_serve >= 0]
         if served.size:
@@ -106,6 +120,9 @@ def build_signal_layer(cfg: Config, towers: TowerSet, G, verbose: bool = True):
         data["s_mean"] = s_mean
         data["serve"] = serve_edge
         data["dead_fraction"] = float(dead_fraction)
+        data["frac_below_cover"]  = float(frac_below_cover)
+        data["frac_below_call"]   = float(frac_below_call)
+        data["frac_below_upload"] = float(frac_below_upload)
         data["n_samples"] = int(len(pts))
 
         done += 1
@@ -118,7 +135,6 @@ def build_signal_layer(cfg: Config, towers: TowerSet, G, verbose: bool = True):
         print(f"done: {n_edges:,} edges in {dt:.1f}s")
         print(f"  sample points with no tower in range: {n_no_tower_points:,}")
     return Gp
-
 
 def cache_path(cfg: Config) -> Path:
     safe = cfg.city.split(",")[0].strip().lower().replace(" ", "_")

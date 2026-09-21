@@ -97,23 +97,33 @@ def attach_objectives(cfg: Config, Gp=None):
         data["q"] = min(data["q_raw"] / q_ref, 1.0)   # clip at 1
         data["q_dwell"] = data["q"] * data["dwell"]
 
-    # --- 4. call-inadequate distance (live-call objective) ---
-    # Mirrors d_dead, but thresholded on RATE instead of coverage: an edge whose
-    # normalized rate q is below the call-quality threshold tau_call contributes
-    # its length as "call-inadequate distance". This lets live-call reuse the same
-    # constrained search as continuity (budget_attr="d_lowrate").
-    tau_call = float(getattr(lcfg, "tau_call", 0.10))    # default 0.10 if not in config
-    for _, _, data in Gp.edges(data=True):
-        inadequate = 1.0 if data["q"] < tau_call else 0.0
-        data["d_lowrate"] = inadequate * data["length"]   # metres below call-quality rate
+    # # --- 4. call-inadequate distance (live-call objective) ---
+    # # Mirrors d_dead, but thresholded on RATE instead of coverage: an edge whose
+    # # normalized rate q is below the call-quality threshold tau_call contributes
+    # # its length as "call-inadequate distance". This lets live-call reuse the same
+    # # constrained search as continuity (budget_attr="d_lowrate").
+    # tau_call = float(getattr(lcfg, "tau_call", 0.10))    # default 0.10 if not in config
+    # for _, _, data in Gp.edges(data=True):
+    #     inadequate = 1.0 if data["q"] < tau_call else 0.0
+    #     data["d_lowrate"] = inadequate * data["length"]   # metres below call-quality rate
 
 
-    # --- upload-inadequate distance (upload objective, Option 1) ---
-    # Like d_lowrate but a HIGHER rate bar: data-heavy uploads need more than a call.
-    tau_upload = float(getattr(lcfg, "tau_upload", 0.30))   # higher than tau_call (0.10)
+    # # --- upload-inadequate distance (upload objective, Option 1) ---
+    # # Like d_lowrate but a HIGHER rate bar: data-heavy uploads need more than a call.
+    # tau_upload = float(getattr(lcfg, "tau_upload", 0.30))   # higher than tau_call (0.10)
+    # for _, _, data in Gp.edges(data=True):
+    #     inadequate = 1.0 if data["q"] < tau_upload else 0.0
+    #     data["d_lowupload"] = inadequate * data["length"]   # metres below upload-rate
+
+    
+    # --- fractional below-threshold distances (point-level, like d_dead) ---
+    # call/upload adequacy now use per-point SINR-threshold fractions computed
+    # in the signal layer (frac_below_call, frac_below_upload), making all three
+    # objectives point-level-consistent with continuity (d_dead).
     for _, _, data in Gp.edges(data=True):
-        inadequate = 1.0 if data["q"] < tau_upload else 0.0
-        data["d_lowupload"] = inadequate * data["length"]   # metres below upload-rate
+        length = float(data["length"])
+        data["d_lowrate"]   = float(data["frac_below_call"])   * length   # call-adequate
+        data["d_lowupload"] = float(data["frac_below_upload"]) * length   # upload-adequate
 
 
     return Gp

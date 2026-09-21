@@ -21,6 +21,8 @@ signal:
   noise_figure_db: 7.0       # NF
   # coverage threshold
   theta_db: 10.0              # usability threshold (SINR >= theta => covered)
+  theta_call_db: 15.0
+  theta_upload_db: 20.0
   
 # ---- Stage 2: load model (v2) ----
 load:
