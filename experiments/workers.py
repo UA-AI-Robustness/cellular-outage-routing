@@ -180,3 +180,83 @@ def upload_pair(G, cfg, task):
                      "lowupload_removed_pct": 100.0*(fast_lu-wlu)/fast_lu,
                      "detour_pct": 100.0*(wt-ft)/ft if ft else 0.0})
     return rows
+
+def _setup_baruffa(G, cfg):
+    """Per-process: attach Baruffa's radio weight R to edges once."""
+    from connroute.search.baruffa import compute_radio_weight
+    compute_radio_weight(G, kind="on_off")
+
+_R_DONE = False
+def baruffa_pair(G, cfg, task):
+    """task = (s, d). Ours (constrained, sweep B) vs Baruffa (sweep alpha),
+    plus a shortest reference, on a common eligible pair. Exposure reduction is
+    vs. the fastest route; detour is travel-time detour.
+    Attaches Baruffa's radio weight R once per worker process."""
+    global _R_DONE
+    if not _R_DONE:
+        from connroute.search.baruffa import compute_radio_weight
+        compute_radio_weight(G, kind="on_off")
+        _R_DONE = True
+
+    from connroute.search.lexico import lexico_route, constrained_route
+    from connroute.search.baruffa import baruffa_route
+    from connroute.search.preferences import build_preferences, make_order
+    s, d = task
+    prefs = build_preferences(cfg)
+
+    def dead_time(path):
+        dd = tt = 0.0
+        for a, b in zip(path[:-1], path[1:]):
+            ed = min(G[a][b].values(), key=lambda e: float(e["time"]))
+            dd += float(ed["d_dead"]); tt += float(ed["time"])
+        return dd, tt
+
+    fp, _ = lexico_route(G, s, d, make_order(prefs, ["time"]))
+    if not fp:
+        return []
+    fast_dead, fast_time = dead_time(fp)
+    if fast_dead <= 0:          # eligible pairs only (fastest route crosses a hole)
+        return []
+
+    rows = []
+
+    def reduction(dead):
+        return 100.0 * (fast_dead - dead) / fast_dead
+
+    def detour(t):
+        return 100.0 * (t - fast_time) / fast_time if fast_time else 0.0
+
+    # shortest reference
+    sp, _ = lexico_route(G, s, d, make_order(prefs, ["distance"]))
+    if sp:
+        sd, st = dead_time(sp)
+        rows.append({"method": "shortest", "knob": 0, "s": s, "d": d,
+                     "reduction": reduction(sd), "detour": detour(st)})
+
+    # ours: constrained, sweep budget
+    for B in (25, 50, 100, 200, 400, 800):
+        cp, _, _ = constrained_route(G, s, d, budget_attr="d_dead",
+                                     budget=float(B), cost_attr="time")
+        if not cp:
+            continue
+        cd, ct = dead_time(cp)
+        rows.append({"method": "constrained", "knob": B, "s": s, "d": d,
+                     "reduction": reduction(cd), "detour": detour(ct)})
+
+    # Baruffa: radio-discount cost, sweep alpha (R attached above)
+    for alpha in (0.0, 0.1, 0.2, 0.3, 0.5, 1.0, 2.0, 5.0):
+        bp, _ = baruffa_route(G, s, d, alpha=alpha)
+        if not bp:
+            continue
+        bd, bt = dead_time(bp)
+        rows.append({"method": "baruffa", "knob": alpha, "s": s, "d": d,
+                     "reduction": reduction(bd), "detour": detour(bt)})
+
+    # k-shortest reranking baseline (rerank the k fastest routes by exposure)
+    from connroute.search.kshortest import kshortest_rerank
+    kp, kexp, kt = kshortest_rerank(G, s, d, k=5)
+    if kp:
+        rows.append({"method": "kshortest_k5", "knob": 5, "s": s, "d": d,
+                     "reduction": reduction(kexp), "detour": detour(kt)})
+
+    return rows
