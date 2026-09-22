@@ -283,21 +283,21 @@ def loadcompare_pair(G, cfg, task):
 
     _, ft = path_metrics(fp, "d_lo_model")
     rows = []
-    for B in (100, 200, 400, 800, 1600):
+    for B in (25, 50, 75, 100, 150, 200, 300):
         for tag, attr in (("model", "d_lo_model"), ("traffic", "d_lo_traf")):
             cp, _, _ = constrained_route(G, s, d, budget_attr=attr,
                                          budget=float(B), cost_attr="time")
             if not cp:
                 continue
             bad, ct = path_metrics(cp, attr)
-            # reduction vs fastest, measured under the SAME load model
             fast_bad, _ = path_metrics(fp, attr)
             rows.append({"load": tag, "knob": B, "s": s, "d": d,
                          "removed_pct": 100.0*(fast_bad-bad)/fast_bad if fast_bad > 0 else 0.0,
                          "detour_pct": 100.0*(ct-ft)/ft if ft else 0.0})
+
     # divergence flag: do the two load models pick different routes at B=200?
-    m,_,_ = constrained_route(G, s, d, budget_attr="d_lo_model", budget=200.0)
-    t,_,_ = constrained_route(G, s, d, budget_attr="d_lo_traf",  budget=200.0)
+    m, _, _ = constrained_route(G, s, d, budget_attr="d_lo_model", budget=200.0)
+    t, _, _ = constrained_route(G, s, d, budget_attr="d_lo_traf",  budget=200.0)
     if m and t:
         rows.append({"load": "diverge", "knob": 200, "s": s, "d": d,
                      "removed_pct": 100.0 if m != t else 0.0, "detour_pct": 0.0})
