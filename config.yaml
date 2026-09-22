@@ -31,7 +31,8 @@ load:
   background_devices: 8      # N_bg (crude constant fallback)
   tau_call: 0.10          # min normalized rate for a usable call
   tau_upload: 0.30
-  use_traffic: false
+  tau_rate: 0.30
+  use_traffic: true
   
 # ---- general ----
 seed: 42

@@ -31,7 +31,8 @@ class LoadCfg:
     background_devices: float
     tau_call: float = 0.10          # NEW, with default so old configs still load
     tau_upload: float = 0.30
-    use_traffic: bool = False        
+    use_traffic: bool = False  
+    tau_rate: float = 0.30      
 
 
 @dataclass

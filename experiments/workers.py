@@ -260,3 +260,45 @@ def baruffa_pair(G, cfg, task):
                      "reduction": reduction(kexp), "detour": detour(kt)})
 
     return rows
+
+def loadcompare_pair(G, cfg, task):
+    """task = (s, d). Rate-inadequate routing under modeled load (d_lo_model)
+    vs traffic-informed load (d_lo_traf), sweep budget. Same pairs, same map;
+    only the load model differs."""
+    from connroute.search.lexico import lexico_route, constrained_route
+    from connroute.search.preferences import build_preferences, make_order
+    s, d = task
+    prefs = build_preferences(cfg)
+
+    fp, _ = lexico_route(G, s, d, make_order(prefs, ["time"]))
+    if not fp:
+        return []
+
+    def path_metrics(path, attr):
+        bad = tt = 0.0
+        for a, b in zip(path[:-1], path[1:]):
+            ed = min(G[a][b].values(), key=lambda e: float(e["time"]))
+            bad += float(ed[attr]); tt += float(ed["time"])
+        return bad, tt
+
+    _, ft = path_metrics(fp, "d_lo_model")
+    rows = []
+    for B in (100, 200, 400, 800, 1600):
+        for tag, attr in (("model", "d_lo_model"), ("traffic", "d_lo_traf")):
+            cp, _, _ = constrained_route(G, s, d, budget_attr=attr,
+                                         budget=float(B), cost_attr="time")
+            if not cp:
+                continue
+            bad, ct = path_metrics(cp, attr)
+            # reduction vs fastest, measured under the SAME load model
+            fast_bad, _ = path_metrics(fp, attr)
+            rows.append({"load": tag, "knob": B, "s": s, "d": d,
+                         "removed_pct": 100.0*(fast_bad-bad)/fast_bad if fast_bad > 0 else 0.0,
+                         "detour_pct": 100.0*(ct-ft)/ft if ft else 0.0})
+    # divergence flag: do the two load models pick different routes at B=200?
+    m,_,_ = constrained_route(G, s, d, budget_attr="d_lo_model", budget=200.0)
+    t,_,_ = constrained_route(G, s, d, budget_attr="d_lo_traf",  budget=200.0)
+    if m and t:
+        rows.append({"load": "diverge", "knob": 200, "s": s, "d": d,
+                     "removed_pct": 100.0 if m != t else 0.0, "detour_pct": 0.0})
+    return rows

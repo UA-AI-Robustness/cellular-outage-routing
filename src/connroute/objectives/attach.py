@@ -122,14 +122,19 @@ def attach_objectives(cfg: Config, Gp=None):
             veh = float(data["length"]) * (1.0 / max(rho, 0.05))   # congested -> more vehicles
             cell_traffic_tt[T] += veh
 
-        # normalize traffic so its mean ~1, comparable to the modeled placeholder scale
-        if cell_traffic_tt:
-            mean_tt = np.mean(list(cell_traffic_tt.values()))
+        # Calibrate traffic-informed load to the SAME total as the modeled load,
+        # so q_tt differs from q ONLY in spatial distribution (congestion), not in
+        # overall level. This isolates the effect of load *variation* from any
+        # baseline shift (which would otherwise be a normalization artifact).
+        modeled_total = sum(cell_traffic.values())          # modeled per-tower traffic total
+        tt_total = sum(cell_traffic_tt.values())
+        if tt_total > 0:
+            scale = modeled_total / tt_total
             for T in list(cell_traffic_tt):
-                cell_traffic_tt[T] /= max(mean_tt, 1e-9)
+                cell_traffic_tt[T] *= scale                 # now sums to modeled_total
 
         def N_tt(T: int) -> float:
-            base = cell_traffic_tt.get(T, 1.0) * lcfg.devices_per_vehicle * lcfg.operator_share
+            base = cell_traffic_tt.get(T, 0.0) * lcfg.devices_per_vehicle * lcfg.operator_share
             return base + lcfg.background_devices
 
         for _, _, data in Gp.edges(data=True):
@@ -144,6 +149,17 @@ def attach_objectives(cfg: Config, Gp=None):
         for _, _, data in Gp.edges(data=True):
             data["q_tt_dwell"] = data["q_tt"] * data["dwell"]
 
+        # rate-inadequate distance under each load model (for the load-comparison
+        # experiment): an edge is inadequate if its normalized rate is below
+        # tau_rate. d_lo_model uses modeled load (q), d_lo_traf uses traffic load
+        # (q_tt). Both share the same total load, so they differ ONLY in the
+        # spatial distribution of congestion.
+        tau_rate = float(getattr(lcfg, "tau_rate", 0.30))
+        for _, _, data in Gp.edges(data=True):
+            L = float(data["length"])
+            data["d_lo_model"] = (1.0 if data["q"]    < tau_rate else 0.0) * L
+            data["d_lo_traf"]  = (1.0 if data["q_tt"] < tau_rate else 0.0) * L
+
     # --- 4. fractional below-threshold distances (point-level, like d_dead) ---
     # call/upload adequacy use per-point SINR-threshold fractions from the signal
     # layer (frac_below_call, frac_below_upload), consistent with continuity (d_dead).
@@ -153,7 +169,6 @@ def attach_objectives(cfg: Config, Gp=None):
         data["d_lowupload"] = float(data["frac_below_upload"]) * length   # upload-adequate
 
     return Gp
-
 
 def cache_path(cfg: Config) -> Path:
     safe = cfg.city.split(",")[0].strip().lower().replace(" ", "_")
