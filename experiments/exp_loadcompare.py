@@ -16,7 +16,7 @@ from connroute.viz.style import apply_style, grid_box, BLUE, GREY, save
 
 N_PAIRS = 500
 MIN_OD_METERS = 2000.0
-N_WORKERS = 8          # lab machine: all cores. Set 2 on a laptop.
+N_WORKERS = None          # lab machine: all cores. Set 2 on a laptop.
 
 
 def sample_pairs():
@@ -96,7 +96,7 @@ if __name__ == "__main__":
                 linewidth=1.5, label="Traffic-informed load", zorder=4)
     ax.set_xlabel(r"Travel-time detour (\%)")
     ax.set_ylabel(r"Rate-inadequate distance removed (\%)")
-    ax.legend(loc="lower left", fontsize=7)
+    ax.legend(loc="lower right", fontsize=7)
     grid_box()
     save("loadcompare_tradeoff", category="load", fig=fig)
     plt.close(fig)

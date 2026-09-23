@@ -33,7 +33,15 @@ REGIMES = {
 N_PAIRS = 500                      # fewer than headline (we do it x3 regimes)
 MIN_OD_METERS = 2000.0
 MIN_FAST_DEAD = 100.0
-BUDGETS = [25, 50, 100, 150, 200, 300, 400, 600, 800]
+# per-regime budget sweep: heavy (34% dead) has too few feasible pairs below
+# 300m for a stable median, so its tight/mid budgets are excluded rather than
+# reported on an unstable, small population.
+BUDGETS_BY_REGIME = {
+    "light (theta=5)":    [25, 50, 100, 200, 300, 400, 600, 800],
+    "moderate (theta=10)": [25, 50, 100, 200, 300, 400, 600, 800],
+    "heavy (theta=15)":   [300, 400, 600, 800],
+}
+MIN_N_FOR_MEDIAN = 20   # warn if a budget point rests on fewer than this many pairs
 MAX_TRIES = 30000
 TOWER_FILE = "data/raw/opencellid_us_310.csv"
 
@@ -83,7 +91,7 @@ def sample_hole_pairs(G, base, n_pairs, seed):
     return pairs
 
 
-def tradeoff_for_graph(G, prefs, pairs):
+def tradeoff_for_graph(G, prefs, pairs, budgets):
     base = make_order(prefs, ["time"])
     rows = []
     for (s, d) in pairs:
@@ -93,7 +101,7 @@ def tradeoff_for_graph(G, prefs, pairs):
         fd, ft = path_dead_time(G, fp)
         if fd < 1.0:
             continue
-        for B in BUDGETS:
+        for B in budgets:
             cp, _, _ = constrained_route(G, s, d, budget_attr="d_dead",
                                          budget=float(B), cost_attr="time")
             if not cp:
@@ -105,9 +113,12 @@ def tradeoff_for_graph(G, prefs, pairs):
                 "detour_pct": 100.0 * (ct - ft) / ft if ft else 0.0,
             })
     df = pd.DataFrame(rows)
+    if df.empty:
+        return pd.DataFrame(columns=["budget", "detour_med", "dead_removed_pct_med", "n"])
     return df.groupby("budget").agg(
         detour_med=("detour_pct", "median"),
         dead_removed_pct_med=("dead_removed_pct", "median"),
+        n=("detour_pct", "count"),
     ).reset_index()
 
 
@@ -133,7 +144,8 @@ if __name__ == "__main__":
 
         base = make_order(prefs, ["time"])
         pairs = sample_hole_pairs(Gp, base, N_PAIRS, cfg.seed)
-        agg = tradeoff_for_graph(Gp, prefs, pairs)
+        budgets = BUDGETS_BY_REGIME[label]
+        agg = tradeoff_for_graph(Gp, prefs, pairs, budgets)
         agg["regime"] = label
         all_agg.append(agg)
 
@@ -142,7 +154,9 @@ if __name__ == "__main__":
                 label=f"{label}, {dead_frac*100:.0f}\\% dead", zorder=3)
         tqdm.write(f"\n{label}  (fully-dead {dead_frac*100:.0f}%, {len(pairs)} pairs)")
         for _, r in agg.iterrows():
-            tqdm.write(f"    B={r['budget']:>4.0f}m  removed={r['dead_removed_pct_med']:5.1f}%  detour={r['detour_med']:5.1f}%")
+            flag = "  <-- LOW n" if r["n"] < MIN_N_FOR_MEDIAN else ""
+            tqdm.write(f"    B={r['budget']:>4.0f}m  removed={r['dead_removed_pct_med']:5.1f}%  "
+                       f"detour={r['detour_med']:5.1f}%  (n={int(r['n'])}){flag}")
 
     ax.set_xlabel(r"Travel-time detour (\%)")
     ax.set_ylabel(r"Dead-zone exposure removed (\%)")

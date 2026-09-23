@@ -32,7 +32,7 @@ load:
   tau_call: 0.10          # min normalized rate for a usable call
   tau_upload: 0.30
   tau_rate: 0.30
-  use_traffic: true
+  use_traffic: false
   
 # ---- general ----
 seed: 42
