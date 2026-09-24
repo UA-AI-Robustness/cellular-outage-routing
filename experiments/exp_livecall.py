@@ -35,7 +35,7 @@ def sample_pairs():
 if __name__ == "__main__":
     pairs = sample_pairs()
     print(f"running {len(pairs)} pairs (live-call) in parallel...")
-    rows = run_parallel("experiments.workers:livecall_pair", pairs, desc="pairs")
+    rows = run_parallel("experiments.workers:livecall_pair", pairs, desc="pairs" ,n_workers=8)
     df = pd.DataFrame(rows)
 
     # ---- fix the population: keep only pairs feasible at ALL constrained budgets ----

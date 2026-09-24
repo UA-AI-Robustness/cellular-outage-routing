@@ -36,10 +36,16 @@ MIN_FAST_DEAD = 100.0
 # per-regime budget sweep: heavy (34% dead) has too few feasible pairs below
 # 300m for a stable median, so its tight/mid budgets are excluded rather than
 # reported on an unstable, small population.
+    # BUDGETS_BY_REGIME = {
+    #     "light (theta=5)":    [25, 50, 100, 200, 300, 400, 600, 800],
+    #     "moderate (theta=10)": [25, 50, 100, 200, 300, 400, 600, 800],
+    #     "heavy (theta=15)":   [300, 400, 600, 800],
+    # }
+
 BUDGETS_BY_REGIME = {
-    "light (theta=5)":    [25, 50, 100, 200, 300, 400, 600, 800],
-    "moderate (theta=10)": [25, 50, 100, 200, 300, 400, 600, 800],
-    "heavy (theta=15)":   [300, 400, 600, 800],
+    "light (theta=5)":    [100,200, 400, 600, 800],
+    "moderate (theta=10)": [100,200, 400, 600, 800],
+    "heavy (theta=15)":   [100,200, 400, 600, 800],
 }
 MIN_N_FOR_MEDIAN = 20   # warn if a budget point rests on fewer than this many pairs
 MAX_TRIES = 30000

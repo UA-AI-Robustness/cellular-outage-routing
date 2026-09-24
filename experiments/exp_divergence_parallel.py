@@ -36,7 +36,7 @@ def sample_pairs():
 if __name__ == "__main__":
     pairs = sample_pairs()
     print(f"running {len(pairs)} pairs in parallel...")
-    rows = run_parallel("experiments.workers:divergence_pair", pairs, desc="pairs")
+    rows = run_parallel("experiments.workers:divergence_pair", pairs, desc="pairs", n_workers=8)
     df = pd.DataFrame(rows)
 
     print("\n=== trade-off (median over pairs whose fast route crosses a hole) ===")

@@ -39,7 +39,7 @@ def sample_pairs():
 if __name__ == "__main__":
     pairs = sample_pairs()
     print(f"running {len(pairs)} pairs (upload-adequate) in parallel...")
-    rows = run_parallel("experiments.workers:upload_pair", pairs, desc="pairs")
+    rows = run_parallel("experiments.workers:upload_pair", pairs, desc="pairs", n_workers=8)
     df = pd.DataFrame(rows)
 
     # per-budget feasibility: each budget uses ITS OWN feasible pairs

@@ -35,7 +35,7 @@ def sample_pairs():
 if __name__ == "__main__":
     pairs = sample_pairs()
     print(f"running {len(pairs)} pairs (ours vs Baruffa vs k-shortest) in parallel...")
-    rows = run_parallel("experiments.workers:baruffa_pair", pairs, desc="pairs")
+    rows = run_parallel("experiments.workers:baruffa_pair", pairs, desc="pairs", n_workers=8)
     df = pd.DataFrame(rows)
 
     def curve(method):
@@ -80,9 +80,9 @@ if __name__ == "__main__":
         fig, ax = plt.subplots()
         ax.plot(con["detour"], con["reduction"], "-o", color=BLUE, markersize=4,
                 linewidth=1.6, label="Ours", zorder=4)
-        if ksh_pt is not None:                         # <-- k-shortest marker
-            ax.scatter([ksh_pt[0]], [ksh_pt[1]], marker="D", color=RED, s=42,
-                       zorder=5, label="$k$-shortest rerank")
+        # if ksh_pt is not None:                         # <-- k-shortest marker
+            # ax.scatter([ksh_pt[0]], [ksh_pt[1]], marker="D", color=RED, s=42,
+            #            zorder=5, label="$k$-shortest rerank")
         ax.set_xlabel(r"Travel-time detour (\%)")
         ax.set_ylabel(r"Predicted exposure reduction (\%)")
         return fig, ax
