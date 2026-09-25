@@ -71,6 +71,7 @@ def build_signal_layer(cfg: Config, towers: TowerSet, G, verbose: bool = True):
         # for each sample point: find nearby towers, compute best SINR
         point_sinr = np.full(len(pts), -np.inf)
         point_serve = np.full(len(pts), -1, dtype=int)
+        point_dist = np.full(len(pts), np.nan)   # distance to the serving tower, metres
 
         # batch tower lookup: query_ball_point accepts multiple points at once
         neighbor_lists = towers.tree.query_ball_point(pts, r=radius)
@@ -88,6 +89,7 @@ def build_signal_layer(cfg: Config, towers: TowerSet, G, verbose: bool = True):
             best = int(np.argmax(rsrp))
             point_serve[i] = idx[best]
             point_sinr[i] = rsrp[best] - n0           # noise-limited SNR (dB)
+            point_dist[i] = d[best]                    # distance to the serving tower
 
         covered = point_sinr >= theta
         dead_fraction = 1.0 - covered.mean()
@@ -116,8 +118,14 @@ def build_signal_layer(cfg: Config, towers: TowerSet, G, verbose: bool = True):
         s_min = float(finite.min()) if finite.size else -np.inf
         s_mean = float(finite.mean()) if finite.size else -np.inf
 
+        # per-point distance to the serving tower, for the Baruffa
+        # amplitude/capacity/tent radio-weight reproductions
+        finite_dist = point_dist[np.isfinite(point_dist)]
+        d_mean = float(finite_dist.mean()) if finite_dist.size else np.inf
+
         data["s_min"] = s_min
         data["s_mean"] = s_mean
+        data["d_mean_serve"] = d_mean
         data["serve"] = serve_edge
         data["dead_fraction"] = float(dead_fraction)
         data["frac_below_cover"]  = float(frac_below_cover)

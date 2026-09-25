@@ -55,7 +55,7 @@ render(cx.providers.OpenStreetMap.Mapnik,
        "coverage_map_osm")
 
 # --- Option 2: CartoDB Positron light/grey (clean, best for overlay) ---
-render("https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png?key=cb1_3rgg_1_311949a0a459755f7ec307af",
+render("https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png?key={os.environ.get('CARTO_API_KEY', '')}",
        "© OpenStreetMap contributors © CARTO",
        "coverage_map_carto_light")
 

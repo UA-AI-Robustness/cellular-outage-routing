@@ -12,35 +12,57 @@ from __future__ import annotations
 import heapq
 import itertools
 import math
-
+import numpy as np
 
 def _snr_lin(db):
     return 10.0 ** (db / 10.0)
 
 
-def compute_radio_weight(G, kind="on_off", s_ref_db=25.0):
-    """Attach R(e) in [0,1] to each edge. 1 = best coverage.
-    kind: 'on_off'  -> R = covered fraction = 1 - dead_fraction
-          'capacity' -> Shannon-like, normalized to s_ref_db."""
-    ref = math.log2(1.0 + _snr_lin(s_ref_db))
+def compute_radio_weight(G, kind="on_off", s_ref_db=25.0, gamma=1.0,
+                         d_max=None, beta=0.2):
+    """Attach R(e) in [0,1] to each edge under a kind-specific key
+    'R_baruffa_<kind>'. 1 = best coverage.
+    kind: 'on_off'    -> R = covered fraction = 1 - dead_fraction
+          'amplitude' -> Baruffa Eq. 14: R = 1 / d^gamma  (normalized)
+          'capacity'  -> Baruffa Eq. 15: R = 1 - log2(d)/log2(D_MAX)
+          'tent'      -> Baruffa Eq. 16: R = (1 - d/D_MAX)^beta
+    d_max: coverage radius D^(MAX) in metres for amplitude/capacity/tent;
+           defaults to the tower search radius if not given.
+    """
+    if d_max is None:
+        d_max = 2000.0
+
+    if kind == "amplitude":
+        raw = []
+        for _, _, data in G.edges(data=True):
+            d = max(float(data.get("d_mean_serve", d_max)), 1.0)
+            raw.append(1.0 / (d ** gamma))
+        raw = np.array(raw)
+        ref = raw.max() if raw.max() > 0 else 1.0
+
+    key = f"R_baruffa_{kind}"   # <-- kind-specific storage
+
     for _, _, data in G.edges(data=True):
         if kind == "on_off":
             R = 1.0 - float(data["dead_fraction"])
+        elif kind == "amplitude":
+            d = max(float(data.get("d_mean_serve", d_max)), 1.0)
+            R = (1.0 / (d ** gamma)) / ref
         elif kind == "capacity":
-            s = float(data.get("s_mean", -math.inf))
-            if not math.isfinite(s):
-                R = 0.0
-            else:
-                R = math.log2(1.0 + _snr_lin(s)) / ref
+            d = max(float(data.get("d_mean_serve", d_max)), 1.0)
+            R = 1.0 - (math.log2(d) / math.log2(d_max))
+        elif kind == "tent":
+            d = float(data.get("d_mean_serve", d_max))
+            R = max(1.0 - d / d_max, 0.0) ** beta
         else:
             raise ValueError(f"unknown radio weight kind: {kind}")
-        data["R_baruffa"] = min(max(R, 0.0), 1.0)   # clip to [0,1]
+        data[key] = min(max(R, 0.0), 1.0)   # <-- store under key, not "R_baruffa"
 
-
-def baruffa_route(G, s, d, alpha, length_attr="length"):
+def baruffa_route(G, s, d, alpha, kind="on_off", length_attr="length"):
     """Dijkstra on Baruffa's cumulative cost g (Eq. 22-23).
-    Requires compute_radio_weight(G, ...) to have set 'R_baruffa' on edges.
-    Returns (path, g_cost) or ([], inf)."""
+    Requires compute_radio_weight(G, kind=kind) to have set
+    'R_baruffa_<kind>' on edges. Returns (path, g_cost) or ([], inf)."""
+    key = f"R_baruffa_{kind}"
     counter = itertools.count()
     dist = {s: 0.0}
     prev = {}
@@ -53,7 +75,7 @@ def baruffa_route(G, s, d, alpha, length_attr="length"):
             break
         for _, v, k, ed in G.edges(u, keys=True, data=True):
             L = float(ed[length_attr])
-            R = float(ed["R_baruffa"])
+            R = float(ed[key])
             edge_cost = max(1.0 - alpha * R, 0.0) * L      # Eq. 23
             ng = g + edge_cost
             if ng < dist.get(v, math.inf):

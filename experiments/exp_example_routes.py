@@ -29,7 +29,7 @@ MIN_OD_METERS = 2500.0
 MIN_DEAD_REMOVED = 300.0
 DEAD_BUDGET = 100.0
 N_EXAMPLES = 10
-CARTO_KEY = os.environ.get("CARTO_API_KEY", "cb1_3rgg_1_311949a0a459755f7ec307af")
+CARTO_KEY = os.environ.get("CARTO_API_KEY", "")
 
 
 # ---------------------------------------------------------------------------

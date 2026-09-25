@@ -187,15 +187,18 @@ def _setup_baruffa(G, cfg):
     compute_radio_weight(G, kind="on_off")
 
 _R_DONE = False
+
 def baruffa_pair(G, cfg, task):
-    """task = (s, d). Ours (constrained, sweep B) vs Baruffa (sweep alpha),
-    plus a shortest reference, on a common eligible pair. Exposure reduction is
-    vs. the fastest route; detour is travel-time detour.
-    Attaches Baruffa's radio weight R once per worker process."""
+    """task = (s, d). Ours (constrained, sweep B) vs Baruffa (sweep alpha,
+    all four radio-weight kinds), plus a shortest reference and k-shortest,
+    on a common eligible pair. Exposure reduction is vs. the fastest route;
+    detour is travel-time detour. Attaches all Baruffa radio weights once
+    per worker process."""
     global _R_DONE
     if not _R_DONE:
         from connroute.search.baruffa import compute_radio_weight
-        compute_radio_weight(G, kind="on_off")
+        for kind in ("on_off", "amplitude", "capacity", "tent"):
+            compute_radio_weight(G, kind=kind)
         _R_DONE = True
 
     from connroute.search.lexico import lexico_route, constrained_route
@@ -243,14 +246,15 @@ def baruffa_pair(G, cfg, task):
         rows.append({"method": "constrained", "knob": B, "s": s, "d": d,
                      "reduction": reduction(cd), "detour": detour(ct)})
 
-    # Baruffa: radio-discount cost, sweep alpha (R attached above)
-    for alpha in (0.0, 0.1, 0.2, 0.3, 0.5, 1.0, 2.0, 5.0):
-        bp, _ = baruffa_route(G, s, d, alpha=alpha)
-        if not bp:
-            continue
-        bd, bt = dead_time(bp)
-        rows.append({"method": "baruffa", "knob": alpha, "s": s, "d": d,
-                     "reduction": reduction(bd), "detour": detour(bt)})
+    # Baruffa: radio-discount cost, sweep alpha, for each radio-weight kind
+    for kind in ("on_off", "amplitude", "capacity", "tent"):
+        for alpha in (0.0, 0.1, 0.2, 0.3, 0.5, 1.0, 2.0, 5.0):
+            bp, _ = baruffa_route(G, s, d, alpha=alpha, kind=kind)
+            if not bp:
+                continue
+            bd, bt = dead_time(bp)
+            rows.append({"method": f"baruffa_{kind}", "knob": alpha, "s": s, "d": d,
+                         "reduction": reduction(bd), "detour": detour(bt)})
 
     # k-shortest reranking baseline (rerank the k fastest routes by exposure)
     from connroute.search.kshortest import kshortest_rerank
