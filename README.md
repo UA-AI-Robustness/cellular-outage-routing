@@ -1,4 +1,4 @@
-# Communication-Aware Route Planning for Connected Vehicles
+# Communication-Aware Path Planning for Connected Vehicles: Travel-Time Optimization Under Cellular Outage Constraints
 
 Route selection for road-bound connected vehicles that minimizes travel time
 subject to an explicit, interpretable budget on predicted cellular-outage
