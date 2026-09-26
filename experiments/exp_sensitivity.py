@@ -1,8 +1,11 @@
 """Sensitivity sweep (RQ4) — does the trade-off knee survive different coverage regimes?
 
-For each regime (a value of theta and/or cell-edge params), rebuild the coverage
-map + objectives, then run the trade-off sweep over the same OD pairs. Overlay all
-regimes' trade-off curves on one figure to show the result is robust.
+For each regime (a value of theta), rebuild the coverage map + objectives, sample
+a pool of OD pairs, then restrict to the COMMON subset feasible at every tested
+budget. Using the same fixed population at every budget guarantees a monotonic
+curve (no population-composition artifacts), at the cost of a smaller n than the
+full sampled pool. The common-set size is reported honestly, not forced to a
+target value.
 """
 from __future__ import annotations
 from pathlib import Path
@@ -24,31 +27,17 @@ from connroute.search.lexico import lexico_route, constrained_route
 from connroute.viz.style import apply_style, grid_box, PALETTE, save
 
 # ---- sweep parameters ----
-# each regime overrides some signal-config fields; label -> overrides
 REGIMES = {
     "light (theta=5)":  {"theta_db": 5.0},
-    "moderate (theta=10)": {"theta_db": 10.0},     # the calibrated baseline
+    "moderate (theta=10)": {"theta_db": 10.0},
     "heavy (theta=15)": {"theta_db": 15.0},
 }
-N_PAIRS = 500                      # fewer than headline (we do it x3 regimes)
+BUDGETS = [25, 50, 100, 200, 300, 400, 600, 800, 1200, 1600]
+POOL_SIZE = 2000          # larger raw pool, since we need pairs feasible at EVERY budget
 MIN_OD_METERS = 2000.0
 MIN_FAST_DEAD = 100.0
-# per-regime budget sweep: heavy (34% dead) has too few feasible pairs below
-# 300m for a stable median, so its tight/mid budgets are excluded rather than
-# reported on an unstable, small population.
-BUDGETS_BY_REGIME = {
-    "light (theta=5)":    [25, 50, 100, 200, 300, 400, 600, 800],
-    "moderate (theta=10)": [25, 50, 100, 200, 300, 400, 600, 800],
-    "heavy (theta=15)":   [25, 50, 100, 200, 300, 400, 600, 800],
-}
-
-# BUDGETS_BY_REGIME = {
-#     "light (theta=5)":    [100,200, 400, 600, 800],
-#     "moderate (theta=10)": [100,200, 400, 600, 800],
-#     "heavy (theta=15)":   [100,200, 400, 600, 800],
-# }
-MIN_N_FOR_MEDIAN = 20   # warn if a budget point rests on fewer than this many pairs
-MAX_TRIES = 30000
+MIN_COMMON_SET = 25       # warn if the common-feasible set is smaller than this
+MAX_TRIES = 60000
 TOWER_FILE = "data/raw/opencellid_us_310.csv"
 
 
@@ -72,13 +61,13 @@ def build_objectives_for_regime(cfg, towers, G_raw, overrides):
         setattr(cfg2.signal, key, val)
     Gp = build_signal_layer(cfg2, towers, G_raw, verbose=False)
     Gp = attach_objectives(cfg2, Gp)
-    # ensure node coords are float for straight-line distance
     for _, nd in Gp.nodes(data=True):
         nd["x"] = float(nd["x"]); nd["y"] = float(nd["y"])
     return Gp
 
 
 def sample_hole_pairs(G, base, n_pairs, seed):
+    """Sample a large pool of 'eligible' pairs (fastest route crosses a hole)."""
     rng = random.Random(seed)
     nodes = list(G.nodes())
     pairs, tries = [], 0
@@ -97,9 +86,17 @@ def sample_hole_pairs(G, base, n_pairs, seed):
     return pairs
 
 
-def tradeoff_for_graph(G, prefs, pairs, budgets):
+def common_feasible_tradeoff(G, prefs, pairs, budgets):
+    """For each budget, find feasible pairs; then restrict ALL budgets to the
+    intersection (pairs feasible at every tested budget). Returns the
+    common-set trade-off table and the common-set size."""
     base = make_order(prefs, ["time"])
-    rows = []
+
+    # first pass: compute per-pair, per-budget feasibility + metrics
+    per_pair_budget = {}   # (pair, B) -> (dead_removed_pct, detour_pct)
+    fast_cache = {}
+    feasible_sets = {B: set() for B in budgets}
+
     for (s, d) in pairs:
         fp, _ = lexico_route(G, s, d, base)
         if not fp:
@@ -107,25 +104,36 @@ def tradeoff_for_graph(G, prefs, pairs, budgets):
         fd, ft = path_dead_time(G, fp)
         if fd < 1.0:
             continue
+        fast_cache[(s, d)] = (fd, ft)
         for B in budgets:
             cp, _, _ = constrained_route(G, s, d, budget_attr="d_dead",
                                          budget=float(B), cost_attr="time")
             if not cp:
                 continue
             cd, ct = path_dead_time(G, cp)
-            rows.append({
-                "budget": B,
-                "dead_removed_pct": 100.0 * (fd - cd) / fd if fd else 0.0,
-                "detour_pct": 100.0 * (ct - ft) / ft if ft else 0.0,
-            })
-    df = pd.DataFrame(rows)
-    if df.empty:
-        return pd.DataFrame(columns=["budget", "detour_med", "dead_removed_pct_med", "n"])
-    return df.groupby("budget").agg(
-        detour_med=("detour_pct", "median"),
-        dead_removed_pct_med=("dead_removed_pct", "median"),
-        n=("detour_pct", "count"),
-    ).reset_index()
+            per_pair_budget[((s, d), B)] = (
+                100.0 * (fd - cd) / fd if fd else 0.0,
+                100.0 * (ct - ft) / ft if ft else 0.0,
+            )
+            feasible_sets[B].add((s, d))
+
+    # common set: pairs feasible at EVERY tested budget
+    common = set.intersection(*feasible_sets.values()) if feasible_sets else set()
+    common_n = len(common)
+
+    rows = []
+    for B in budgets:
+        vals_removed = [per_pair_budget[(p, B)][0] for p in common]
+        vals_detour = [per_pair_budget[(p, B)][1] for p in common]
+        if not vals_removed:
+            continue
+        rows.append({
+            "budget": B,
+            "detour_med": float(np.median(vals_detour)),
+            "dead_removed_pct_med": float(np.median(vals_removed)),
+            "n": common_n,
+        })
+    return pd.DataFrame(rows), common_n
 
 
 if __name__ == "__main__":
@@ -144,25 +152,27 @@ if __name__ == "__main__":
     for i, (label, overrides) in enumerate(tqdm(REGIMES.items(), desc="regimes", unit="regime")):
         Gp = build_objectives_for_regime(cfg, towers, G_raw, overrides)
 
-        # dead fraction of this regime (for the legend / reporting)
         dead_frac = np.mean([1.0 if float(d["dead_fraction"]) >= 0.999 else 0.0
                              for _, _, d in Gp.edges(data=True)])
 
         base = make_order(prefs, ["time"])
-        pairs = sample_hole_pairs(Gp, base, N_PAIRS, cfg.seed)
-        budgets = BUDGETS_BY_REGIME[label]
-        agg = tradeoff_for_graph(Gp, prefs, pairs, budgets)
+        pairs = sample_hole_pairs(Gp, base, POOL_SIZE, cfg.seed)
+        agg, common_n = common_feasible_tradeoff(Gp, prefs, pairs, BUDGETS)
         agg["regime"] = label
         all_agg.append(agg)
 
         ax.plot(agg["detour_med"], agg["dead_removed_pct_med"], "-o",
                 color=PALETTE[i], markersize=4, linewidth=1.4,
-                label=f"{label}, {dead_frac*100:.0f}\\% dead", zorder=3)
-        tqdm.write(f"\n{label}  (fully-dead {dead_frac*100:.0f}%, {len(pairs)} pairs)")
+                label=f"{label}, {dead_frac*100:.0f}\\% dead (n={common_n})", zorder=3)
+
+        tqdm.write(f"\n{label}  (fully-dead {dead_frac*100:.0f}%, "
+                   f"pool={len(pairs)}, common-feasible n={common_n})")
+        if common_n < MIN_COMMON_SET:
+            tqdm.write(f"  WARNING: common set below {MIN_COMMON_SET} pairs; "
+                       f"consider increasing POOL_SIZE for this regime")
         for _, r in agg.iterrows():
-            flag = "  <-- LOW n" if r["n"] < MIN_N_FOR_MEDIAN else ""
-            tqdm.write(f"    B={r['budget']:>4.0f}m  removed={r['dead_removed_pct_med']:5.1f}%  "
-                       f"detour={r['detour_med']:5.1f}%  (n={int(r['n'])}){flag}")
+            tqdm.write(f"    B={r['budget']:>5.0f}m  removed={r['dead_removed_pct_med']:5.1f}%  "
+                       f"detour={r['detour_med']:5.1f}%")
 
     ax.set_xlabel(r"Travel-time detour (\%)")
     ax.set_ylabel(r"Dead-zone exposure removed (\%)")
