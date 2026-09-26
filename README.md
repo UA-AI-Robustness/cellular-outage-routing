@@ -171,36 +171,10 @@ on the lab machine, higher values (8+) run safely.
   conditions at query time — re-running will use current traffic, not the
   paper's original snapshot.
 
-## Repository cleanup (done)
-
-The following were removed as superseded or unused by the current pipeline
-and final paper method:
-
-- `exp_upload.py`, `exp_divergence.py`, `exp_tradeoff.py` — superseded by
-  `exp_upload_adequate.py`, `exp_divergence_parallel.py`, and
-  `exp_baruffa.py` respectively.
-- The tile-partition search heuristic (`heuristics.py`, `mats.py`,
-  `tile_heuristic.py`, `tiles.py`) and its verification notebooks (07, 08,
-  09, 13, 14, 15) — a working alternative search strategy that is not used
-  by the final method described in the paper (the search is unguided,
-  `h ≡ 0`).
-- `23_baruffa_smoke.py` — superseded by `experiments/exp_baruffa.py`.
-- `coverage_heatmap.html`, `lctest.py` (project root) — generated output /
-  scratch file, not source.
-- `config.yaml`'s `load.tau_call` / `tau_upload` and the matching
-  `LoadCfg` fields — unused by the current codebase (the final method uses
-  fractional SINR thresholds, `theta_call_db` / `theta_upload_db`, not a
-  rate cutoff).
-
 ## Citation
 
 If you use this code, please cite:
 
 ```bibtex
-@inproceedings{connroute2027,
-  title     = {Communication-Aware Path Planning for Connected Vehicles:
-               Travel-Time Optimization Under Cellular Outage Constraints},
-  booktitle = {IEEE International Conference on Communications (ICC)},
-  year      = {2027}
-}
+waiting...
 ```
