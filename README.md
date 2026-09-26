@@ -27,17 +27,21 @@ strongest reproduced radio-coverage-aware baseline (Baruffa et al., on--off
 variant), and substantially outperforms a weighted-sum scalarization and
 `k`-shortest reranking.*
 
-![Coverage heatmap](docs/figures/coverage_heatmap.png)
-
-*Predicted below-threshold cellular service is spatially coherent, creating
-route-dependent communication exposure for connected vehicles — the
-motivation for treating route choice as a communication-aware decision.*
-
-![Route overlay example](docs/figures/route_overlay.png)
-
-*The fastest and shortest routes cross predicted weak-service regions; the
-continuity-, call-, and upload-aware routes detour around them, deviating
-further as the service requirement gets stricter.*
+<table>
+<tr>
+<td width="50%">
+<img src="docs/figures/coverage_heatmap.png" alt="Coverage heatmap"/>
+<p><em>Predicted below-threshold cellular service is spatially coherent,
+creating route-dependent communication exposure for connected
+vehicles.</em></p>
+</td>
+<td width="50%">
+<img src="docs/figures/route_overlay.png" alt="Route overlay example"/>
+<p><em>Fastest and shortest routes cross predicted weak-service regions;
+continuity-, call-, and upload-aware routes detour around them.</em></p>
+</td>
+</tr>
+</table>
 
 ## Key findings
 
